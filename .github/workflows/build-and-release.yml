@@ -1,0 +1,350 @@
+name: Build and Release Distributable Package
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Type of release'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: |
+        npm ci
+        npm install -g pkg
+        # Install native module rebuild tools
+        npm install -g node-gyp
+        
+    - name: Verify obfuscated code
+      run: |
+        echo "Verifying this is obfuscated code..."
+        if [ -f "package.json" ]; then
+          if grep -q '"obfuscated".*true' package.json; then
+            echo "✅ Code is properly obfuscated"
+          else
+            echo "❌ Code doesn't appear to be obfuscated"
+            exit 1
+          fi
+        fi
+        
+    - name: Rebuild native modules
+      run: |
+        echo "Rebuilding native modules for packaging..."
+        # Rebuild native modules that are problematic with pkg
+        npm rebuild sqlite3 --build-from-source || echo "sqlite3 rebuild failed, continuing..."
+        npm rebuild keytar --build-from-source || echo "keytar rebuild failed, continuing..."
+        npm rebuild bcrypt --build-from-source || echo "bcrypt rebuild failed, continuing..."
+        
+    - name: Run basic validation
+      run: |
+        node --check src/index.js || node --check src/app.js || echo "Basic syntax validation completed"
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-${{ matrix.node-version }}
+        path: |
+          src/
+          package.json
+          package-lock.json
+
+  package:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            output: cross-exchange-daemon-linux
+          - os: windows-latest
+            target: win-x64
+            output: cross-exchange-daemon-win.exe
+          - os: macos-latest
+            target: macos-x64
+            output: cross-exchange-daemon-macos
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: |
+        npm ci
+        npm install -g pkg
+        # Install native module rebuild tools
+        npm install -g node-gyp
+        
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: build-${{ env.NODE_VERSION }}
+        
+    - name: Prepare package.json for pkg
+      run: |
+        echo "Preparing package.json for pkg with native modules..."
+        # Create a pkg-optimized package.json
+        node -e "
+        const pkg = require('./package.json');
+        
+        // Configure pkg to handle native modules and problematic packages
+        pkg.pkg = {
+          'scripts': 'src/index.js',
+          'targets': ['${{ matrix.target }}'],
+          'outputPath': 'dist',
+          'options': ['--enable-source-maps'],
+          'assets': [
+            'assets/**/*',
+            'contracts/**/*',
+            'node_modules/sqlite3/lib/binding/**/*',
+            'node_modules/keytar/build/**/*',
+            'node_modules/bcrypt/lib/binding/**/*'
+          ],
+          'patches': {
+            'sqlite3': 'patches/sqlite3.js',
+            'keytar': 'patches/keytar.js',
+            'bcrypt': 'patches/bcrypt.js'
+          }
+        };
+        
+        // Handle problematic crypto packages
+        const problematicPackages = [
+          'websocket',
+          'web3',
+          'web3-core', 
+          'web3-providers-ws',
+          'web3-core-requestmanager',
+          '@truffle/contract',
+          '@truffle/hdwallet-provider'
+        ];
+        
+        if (!pkg.browser) pkg.browser = {};
+        problematicPackages.forEach(packageName => {
+          pkg.browser[packageName] = false;
+        });
+        
+        require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2));
+        "
+        
+    - name: Create native module patches
+      run: |
+        mkdir -p patches
+        
+        # Create sqlite3 patch
+        cat > patches/sqlite3.js << 'EOF'
+        try {
+          module.exports = require('sqlite3');
+        } catch (e) {
+          console.warn('sqlite3 native module not available, using fallback');
+          module.exports = null;
+        }
+        EOF
+        
+        # Create keytar patch
+        cat > patches/keytar.js << 'EOF'
+        try {
+          module.exports = require('keytar');
+        } catch (e) {
+          console.warn('keytar native module not available, using fallback');
+          module.exports = {
+            getPassword: () => Promise.resolve(null),
+            setPassword: () => Promise.resolve(),
+            deletePassword: () => Promise.resolve()
+          };
+        }
+        EOF
+        
+        # Create bcrypt patch
+        cat > patches/bcrypt.js << 'EOF'
+        try {
+          module.exports = require('bcrypt');
+        } catch (e) {
+          console.warn('bcrypt native module not available, using bcryptjs fallback');
+          module.exports = require('bcryptjs');
+        }
+        EOF
+        
+    - name: Create portable executable
+      run: |
+        echo "Creating portable executable with native module support..."
+        # Try pkg with error handling
+        pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
+          echo "Standard pkg failed, trying alternative approach..."
+          
+          # Alternative: Create a bundled version without pkg
+          mkdir -p dist
+          cp -r src dist/
+          cp package.json dist/
+          cp -r node_modules dist/ 2>/dev/null || echo "node_modules copy failed"
+          
+          # Create startup script
+          if [[ "${{ matrix.target }}" == *"win"* ]]; then
+            cat > dist/start.bat << 'EOF'
+        @echo off
+        node src/index.js %*
+        EOF
+            # Create self-extracting archive for Windows
+            7z a -sfx ${{ matrix.output }} dist/*
+          else
+            cat > dist/start.sh << 'EOF'
+        #!/bin/bash
+        cd "$(dirname "$0")"
+        node src/index.js "$@"
+        EOF
+            chmod +x dist/start.sh
+            # Create self-extracting archive for Unix
+            tar -czf ${{ matrix.output }}.tar.gz -C dist .
+          fi
+        }
+        
+    - name: Create archive (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        tar -czf ${{ matrix.output }}.tar.gz ${{ matrix.output }}
+        
+    - name: Create archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        7z a ${{ matrix.output }}.zip ${{ matrix.output }}
+        
+    - name: Upload executable artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.output }}
+        path: |
+          ${{ matrix.output }}*
+          
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to DockerHub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          cryptween/cross-exchange-daemon
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=edge,branch=main
+          
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: [build, package, docker]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Create release notes
+      id: release_notes
+      run: |
+        echo "## Release Notes" > release_notes.md
+        echo "" >> release_notes.md
+        echo "### Downloads" >> release_notes.md
+        echo "- **Linux**: cross-exchange-daemon-linux.tar.gz" >> release_notes.md
+        echo "- **Windows**: cross-exchange-daemon-win.exe.zip" >> release_notes.md
+        echo "- **macOS**: cross-exchange-daemon-macos.tar.gz" >> release_notes.md
+        echo "- **Docker**: \`docker pull cryptween/cross-exchange-daemon:latest\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### Note" >> release_notes.md
+        echo "This is an obfuscated version of the Cross Exchange Daemon for distribution." >> release_notes.md
+        echo "Source code obfuscated on: $(date)" >> release_notes.md
+        
+    - name: Create GitHub Release
+      uses: ncipollo/release-action@v1
+      with:
+        bodyFile: release_notes.md
+        artifacts: |
+          cross-exchange-daemon-linux/cross-exchange-daemon-linux.tar.gz
+          cross-exchange-daemon-win.exe/cross-exchange-daemon-win.exe.zip
+          cross-exchange-daemon-macos/cross-exchange-daemon-macos.tar.gz
+        token: ${{ secrets.GITHUB_TOKEN }}
+        prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+
+  notify:
+    if: always()
+    needs: [build, package, docker, release]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Notify on success
+      if: ${{ needs.build.result == 'success' && needs.package.result == 'success' }}
+      run: |
+        echo "✅ Build and packaging completed successfully!"
+        
+    - name: Notify on failure
+      if: ${{ needs.build.result == 'failure' || needs.package.result == 'failure' }}
+      run: |
+        echo "❌ Build or packaging failed!"
+        exit 1

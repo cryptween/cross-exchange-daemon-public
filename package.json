@@ -1,0 +1,117 @@
+{
+  "name": "daemon-public",
+  "version": "0.0.5",
+  "description": "Cross exchange daemon to perform cross exchange data collection and cryptween services updates. (Obfuscated Version)",
+  "bin": "src/index.js",
+  "main": "src/index.js",
+  "repository": "https://github.com/cryptween/cross-exchange-daemon.git",
+  "contributors": [
+    "https://github.com/hagopj13/node-express-boilerplate.git"
+  ],
+  "author": "israel gonzalez medina <israel.gonzalezmedina@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "scripts": {
+    "start": "pm2 start ecosystem.config.json",
+    "stop": "pm2 stop ecosystem.config.json",
+    "status": "pm2 status",
+    "logs": "pm2 logs daemon",
+    "docker:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml up",
+    "docker:dev": "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "docker:test": "docker-compose -f docker-compose.yml -f docker-compose.test.yml up",
+    "build": "scripts/build-portable.sh",
+    "obfuscate:tag": "node scripts/obfuscate-and-deploy.js --tag-only",
+    "obfuscate:deploy:win": "pwsh scripts/obfuscate-and-deploy.ps1",
+    "obfuscate:tag:win": "pwsh scripts/obfuscate-and-deploy.ps1 -TagOnly",
+    "test:obfuscation": "node scripts/test-obfuscation.js",
+    "test:obfuscation:verbose": "node scripts/test-obfuscation.js --verbose",
+    "verify:deployment": "node scripts/verify-deployment.js",
+    "verify:deployment:verbose": "node scripts/verify-deployment.js --verbose",
+    "monitor:release": "node scripts/monitor-release.js",
+    "monitor:release:once": "node scripts/monitor-release.js --once",
+    "ci:test-pipeline": "npm run test:obfuscation && npm run verify:deployment"
+  },
+  "keywords": [
+    "node",
+    "node.js",
+    "es6",
+    "es7",
+    "es8",
+    "es9",
+    "docker",
+    "joi",
+    "eslint"
+  ],
+  "pkg": {
+    "scripts": "src/index.js",
+    "assets": [
+      "assets/**/*",
+      "contracts/**/*",
+      "node_modules/sqlite3/lib/binding/**/*",
+      "node_modules/keytar/build/**/*",
+      "node_modules/bcrypt/lib/binding/**/*",
+      "node_modules/bcryptjs/dist/**/*"
+    ],
+    "options": [
+      "--enable-source-maps"
+    ],
+    "outputPath": "dist"
+  },
+  "dependencies": {
+    "@truffle/contract": "^4.6.31",
+    "@truffle/hdwallet-provider": "^2.1.15",
+    "axios": "^1.5.1",
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
+    "bn.js": "^5.2.1",
+    "ccxt": "^4.4.61",
+    "chokidar": "^3.5.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
+    "cryptween-daemon": "file:",
+    "dotenv": "^16.3.1",
+    "express": "^4.17.1",
+    "express-mongo-sanitize": "^2.0.0",
+    "express-rate-limit": "^5.0.0",
+    "fs-extra": "^11.1.1",
+    "helmet": "^4.1.0",
+    "http-status": "^1.7.0",
+    "https-proxy-agent": "^7.0.2",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^8.5.1",
+    "keytar": "^7.9.0",
+    "lodash": "^4.17.21",
+    "moment": "^2.24.0",
+    "morgan": "^1.9.1",
+    "node-binance-api": "^0.13.1",
+    "nodemailer": "^6.9.16",
+    "passport": "^0.4.0",
+    "passport-jwt": "^4.0.0",
+    "pm2": "^5.1.0",
+    "sqlite3": "^5.1.7",
+    "swagger-jsdoc": "^6.0.8",
+    "swagger-ui-express": "^4.1.6",
+    "validator": "^13.0.0",
+    "web3": "^1.10.4",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^4.7.1",
+    "ws": "^8.14.2",
+    "xss-clean": "^0.1.1"
+  },
+  "obfuscated": true,
+  "obfuscatedAt": "2025-10-23T14:53:01.730Z",
+  "browser": {
+    "web3": false,
+    "@truffle/contract": false,
+    "@truffle/hdwallet-provider": false
+  },
+  "nativeModules": {
+    "sqlite3": "Database operations",
+    "keytar": "Secure credential storage",
+    "bcrypt": "Password hashing",
+    "note": "These modules require native compilation and may need rebuild on target systems"
+  }
+}

@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 09wm84une8unt98eub5y5
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpswd
+      MYSQL_DATABASE: cryptween
+    ports:
+      - "3306:3306"
+    command: --lower_case_table_names=1 --log_bin_trust_function_creators=1
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  mongo:
+    image: mongo
+    container_name: mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpswd
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./mongo/data:/data/db
+
+  mongoId:
+    image: mongo
+    container_name: mongoId
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpswd
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./mongo/dataId:/data/db
+
+  mongoBk:
+    image: mongo
+    container_name: mongoBk
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpswd
+    ports:
+      - "27019:27017"
+    volumes:
+      - ./mongo/dataBk:/data/db
+
+volumes:
+  mysql_data:
+  # The "mongodata" named docker volume is not directly needed if you are using bind mounts as in the original commands.
