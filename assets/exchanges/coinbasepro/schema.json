@@ -1,0 +1,43 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["id", "key", "secret", "password"],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "A unique identifier"
+      },
+      "key": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9]+$",
+        "description": "API Key (64 characters)"
+      },
+      "secret": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9]+$",
+        "description": "Secret Key (64 characters)"
+      },
+      "password": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9]+$",
+        "description": "password (64 characters)"
+      },
+      "options": {
+        "type": "object",
+        "description": "Optional configuration settings",
+        "properties": {
+          "test": {
+            "type": "boolean",
+            "description": "Enable test mode"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+  
