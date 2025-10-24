@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:38:15.508Z - Fix missing scripts: Use bash commands until scripts are obfuscated
+# Trigger: 2025-10-24T20:46:16.482Z - Force bash shell: Fix Windows PowerShell compatibility issues
 name: Enhanced Build and Release Pipeline
 
 on:

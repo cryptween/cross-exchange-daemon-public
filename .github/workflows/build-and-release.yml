@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:38:15.504Z - Fix missing scripts: Use bash commands until scripts are obfuscated
+# Trigger: 2025-10-24T20:46:16.479Z - Force bash shell: Fix Windows PowerShell compatibility issues
 name: Build and Release Distributable Package
 
 on:
@@ -173,6 +173,7 @@ jobs:
         "
         
     - name: Create native module patches
+      shell: bash
       run: |
         # Create patches directory
         mkdir -p patches
@@ -208,6 +209,7 @@ jobs:
         echo "✓ Native module patches created"
         
     - name: Create portable executable
+      shell: bash
       run: |
         echo "Creating portable executable with native module support..."
         
