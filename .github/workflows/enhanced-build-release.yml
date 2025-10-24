@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T19:33:18.735Z - Fix bash syntax error: remove duplicate fi statements
+# Trigger: 2025-10-24T19:41:59.839Z - Fix Windows build: Replace bash commands with cross-platform Node.js
 name: Enhanced Build and Release Pipeline
 
 on:
