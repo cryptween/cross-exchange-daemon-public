@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T19:21:58.353Z - Update workflow: Force ncc bundling, fix PKG obfuscation issues
+# Trigger: 2025-10-24T19:33:18.735Z - Fix bash syntax error: remove duplicate fi statements
 name: Enhanced Build and Release Pipeline
 
 on:
