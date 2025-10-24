@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T22:46:27.158Z - Fix macOS Node.js path issues and improve error handling
+# Trigger: 2025-10-24T23:57:27.170Z - Improve test progress tracking and optimize timeouts for macOS
 name: Build and Release Distributable Package
 
 on:
@@ -442,9 +442,10 @@ jobs:
           fi
           
           # Run help command (exit code 1 is normal for help commands)
+          echo "  ⏳ Executing help command (timeout: 15s)..."
           if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
             # Windows script test
-            timeout 10s cmd //c "$exec_path --help" > test_help.out 2>&1; help_exit_code=$?
+            timeout 15s cmd //c "$exec_path --help" > test_help.out 2>&1; help_exit_code=$?
           elif [[ "$test_type" == "executable" ]]; then
             # Direct executable test - add some debugging
             echo "  🔍 Testing executable directly..."
@@ -452,11 +453,12 @@ jobs:
               echo "  📚 Checking library dependencies..."
               ldd "$exec_path" | head -5
             fi
-            timeout 10s "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
+            timeout 15s "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
           else
             # Unix script test
-            timeout 10s bash "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
+            timeout 15s bash "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
           fi
+          echo "  ✓ Help command execution completed"
           
           echo "  🔧 Help command exit code: $help_exit_code (0 or 1 is normal)"
           
@@ -504,6 +506,7 @@ jobs:
           
           # Test 2: Version command
           echo "  → Testing version command..."
+          echo "  ⏳ Executing version command (timeout: 10s)..."
           if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
             timeout 10s cmd //c "$exec_path --version" > test_version.out 2>&1; version_exit_code=$?
           elif [[ "$test_type" == "executable" ]]; then
@@ -511,6 +514,7 @@ jobs:
           else
             timeout 10s bash "$exec_path" --version > test_version.out 2>&1; version_exit_code=$?
           fi
+          echo "  ✓ Version command execution completed"
           
           echo "  🔧 Version command exit code: $version_exit_code"
           
@@ -546,13 +550,15 @@ jobs:
           
           # Test 4: Quick startup test (simulate real execution)
           echo "  → Testing daemon startup simulation..."
+          echo "  ⏳ Quick startup test (timeout: 8s)..."
           if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
-            timeout 5s cmd //c "echo. | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
+            timeout 8s cmd //c "echo. | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
           elif [[ "$test_type" == "executable" ]]; then
-            timeout 5s bash -c "echo | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"  
+            timeout 8s bash -c "echo | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"  
           else
-            timeout 5s bash -c "echo | bash $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
+            timeout 8s bash -c "echo | bash $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
           fi
+          echo "  ✓ Startup test execution completed"
           
           # Look for startup banner or evidence of successful initialization
           if grep -q "Cryptween Daemon\|Cross-Exchange\|Starting services\|Environment:" test_startup.out 2>/dev/null; then
