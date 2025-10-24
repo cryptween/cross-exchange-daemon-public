@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:18:25.408Z - Simplify Node.js scripts: Use node -p single-line approach to avoid escaping
+# Trigger: 2025-10-24T20:31:52.283Z - Use dedicated scripts: Replace inline Node.js with separate script files
 name: Build and Release Distributable Package
 
 on:
@@ -174,13 +174,7 @@ jobs:
         
     - name: Create native module patches
       run: |
-        node -p "
-        const fs = require('fs'); 
-        fs.mkdirSync('patches', {recursive: true}); 
-        fs.writeFileSync('patches/sqlite3.js', 'try { module.exports = require(\\\"sqlite3\\\"); } catch (e) { console.warn(\\\"sqlite3 not available\\\"); module.exports = null; }'); 
-        fs.writeFileSync('patches/keytar.js', 'try { module.exports = require(\\\"keytar\\\"); } catch (e) { console.warn(\\\"keytar not available\\\"); module.exports = { getPassword: () => Promise.resolve(null), setPassword: () => Promise.resolve(), deletePassword: () => Promise.resolve() }; }'); 
-        fs.writeFileSync('patches/bcrypt.js', 'try { module.exports = require(\\\"bcrypt\\\"); } catch (e) { console.warn(\\\"bcrypt not available\\\"); module.exports = require(\\\"bcryptjs\\\"); }'); 
-        'Patches created successfully'"
+        node scripts/create-patches.js
         
     - name: Create portable executable
       run: |
@@ -221,18 +215,8 @@ jobs:
             
             echo "✓ ncc bundling successful, creating portable package..."
             
-            # Create final package structure using Node.js
-            node -p "
-            const fs = require('fs-extra'); 
-            fs.ensureDirSync('dist'); 
-            if (fs.existsSync('dist-bundle/index.js')) fs.copyFileSync('dist-bundle/index.js', 'dist/index.js'); 
-            if (fs.existsSync('package.json')) fs.copyFileSync('package.json', 'dist/package.json'); 
-            if (fs.existsSync('assets')) fs.copySync('assets', 'dist/assets'); 
-            if (fs.existsSync('contracts')) fs.copySync('contracts', 'dist/contracts'); 
-            const target = '${{ matrix.target }}'; 
-            const output = '${{ matrix.output }}'; 
-            if (target.includes('win')) { fs.writeFileSync(output, '@echo off\\ncd /d \\\"%~dp0\\\\dist\\\"\\nnode index.js %*'); } else { fs.writeFileSync(output, '#!/bin/bash\\ncd \\\"$(dirname \\\"$0\\\")/dist\\\"\\nexec node index.js \\\"$@\\\"'); try { fs.chmodSync(output, '755'); } catch(e) {} } 
-            'Bundle created successfully'"
+            # Create final package structure using dedicated script
+            node scripts/create-bundle.js "${{ matrix.target }}" "${{ matrix.output }}" "ncc"
             
             echo "✓ Portable bundle created successfully"
           else
@@ -255,18 +239,8 @@ jobs:
           else
             echo "❌ PKG build failed, creating Node.js bundle..."
             
-            # Final fallback: Basic Node.js package using cross-platform commands
-            node -p "
-            const fs = require('fs-extra'); 
-            fs.ensureDirSync('dist'); 
-            if (fs.existsSync('src')) fs.copySync('src', 'dist/src'); 
-            if (fs.existsSync('package.json')) fs.copyFileSync('package.json', 'dist/package.json'); 
-            if (fs.existsSync('assets')) fs.copySync('assets', 'dist/assets'); 
-            if (fs.existsSync('contracts')) fs.copySync('contracts', 'dist/contracts'); 
-            const target = '${{ matrix.target }}'; 
-            const output = '${{ matrix.output }}'; 
-            if (target.includes('win')) { fs.writeFileSync(output, '@echo off\\ncd /d \\\"%~dp0\\\\dist\\\"\\nnode src/index.js %*'); } else { fs.writeFileSync(output, '#!/bin/bash\\ncd \\\"$(dirname \\\"$0\\\")/dist\\\"\\nexec node src/index.js \\\"$@\\\"'); try { fs.chmodSync(output, '755'); } catch(e) {} } 
-            'Fallback bundle created successfully'"
+            # Final fallback: Basic Node.js package using dedicated script
+            node scripts/create-bundle.js "${{ matrix.target }}" "${{ matrix.output }}" "fallback"
             
             echo "✓ Node.js bundle created as fallback"
           fi

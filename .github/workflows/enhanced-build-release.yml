@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:18:25.416Z - Simplify Node.js scripts: Use node -p single-line approach to avoid escaping
+# Trigger: 2025-10-24T20:31:52.294Z - Use dedicated scripts: Replace inline Node.js with separate script files
 name: Enhanced Build and Release Pipeline
 
 on:
