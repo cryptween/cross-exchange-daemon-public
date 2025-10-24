@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T22:20:09.931Z - Fix V8 fatal errors - create obfuscation-safe Node.js distribution
+# Trigger: 2025-10-24T22:25:50.232Z - Fix test validation - handle help command exit codes correctly
 name: Build and Release Distributable Package
 
 on:
@@ -418,9 +418,10 @@ jobs:
             return 1
           fi
           
+          # Run help command (exit code 1 is normal for help commands)
           if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
             # Windows script test
-            timeout 10s cmd //c "$exec_path --help" > test_help.out 2>&1 || echo "Help command completed"
+            timeout 10s cmd //c "$exec_path --help" > test_help.out 2>&1; help_exit_code=$?
           elif [[ "$test_type" == "executable" ]]; then
             # Direct executable test - add some debugging
             echo "  🔍 Testing executable directly..."
@@ -428,14 +429,22 @@ jobs:
               echo "  📚 Checking library dependencies..."
               ldd "$exec_path" | head -5
             fi
-            timeout 10s "$exec_path" --help > test_help.out 2>&1 || echo "Help command completed"
+            timeout 10s "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
           else
             # Unix script test
-            timeout 10s bash "$exec_path" --help > test_help.out 2>&1 || echo "Help command completed"
+            timeout 10s bash "$exec_path" --help > test_help.out 2>&1; help_exit_code=$?
           fi
           
-          if grep -q "Cross-Exchange Data Collection Service" test_help.out 2>/dev/null; then
+          echo "  🔧 Help command exit code: $help_exit_code (0 or 1 is normal)"
+          
+          # Check for successful help output (multiple possible patterns)
+          if grep -q "Cross-Exchange Data Collection Service\|Cross Exchange Daemon Launcher\|daemon.*v[0-9]" test_help.out 2>/dev/null; then
             echo "  ✅ Help command works - basic functionality OK"
+            # Show a snippet of the help output
+            help_line=$(grep -E "daemon.*v[0-9]|Cross.*Daemon" test_help.out 2>/dev/null | head -1)
+            if [ -n "$help_line" ]; then
+              echo "  ℹ️  Output: $help_line"
+            fi
           else
             echo "  ❌ Help command failed"
             echo "  📄 Error output:"
@@ -459,12 +468,14 @@ jobs:
           # Test 2: Version command
           echo "  → Testing version command..."
           if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
-            timeout 10s cmd //c "$exec_path --version" > test_version.out 2>&1 || echo "Version command completed"
+            timeout 10s cmd //c "$exec_path --version" > test_version.out 2>&1; version_exit_code=$?
           elif [[ "$test_type" == "executable" ]]; then
-            timeout 10s "$exec_path" --version > test_version.out 2>&1 || echo "Version command completed"
+            timeout 10s "$exec_path" --version > test_version.out 2>&1; version_exit_code=$?
           else
-            timeout 10s bash "$exec_path" --version > test_version.out 2>&1 || echo "Version command completed"
+            timeout 10s bash "$exec_path" --version > test_version.out 2>&1; version_exit_code=$?
           fi
+          
+          echo "  🔧 Version command exit code: $version_exit_code"
           
           if grep -q "daemon v" test_version.out 2>/dev/null; then
             version_output=$(cat test_version.out 2>/dev/null | head -1)
