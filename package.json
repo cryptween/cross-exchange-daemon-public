@@ -102,7 +102,7 @@
     "xss-clean": "^0.1.1"
   },
   "obfuscated": true,
-  "obfuscatedAt": "2025-10-24T18:22:53.103Z",
+  "obfuscatedAt": "2025-10-24T18:54:13.536Z",
   "browser": {
     "web3": false,
     "@truffle/contract": false,

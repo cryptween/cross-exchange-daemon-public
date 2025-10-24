@@ -125,7 +125,7 @@ jobs:
         node -e "
         const pkg = require('./package.json');
         
-        # Configure pkg to handle native modules and problematic packages
+        // Configure pkg to handle native modules and problematic packages
         pkg.pkg = {
           'scripts': 'src/index.js',
           'targets': ['${{ matrix.target }}'],
@@ -148,7 +148,7 @@ jobs:
           }
         };
         
-        # Handle problematic crypto packages
+        // Handle problematic crypto packages
         const problematicPackages = [
           'websocket',
           'web3',
