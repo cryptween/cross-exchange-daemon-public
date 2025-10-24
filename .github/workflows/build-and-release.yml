@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:31:52.283Z - Use dedicated scripts: Replace inline Node.js with separate script files
+# Trigger: 2025-10-24T20:38:15.504Z - Fix missing scripts: Use bash commands until scripts are obfuscated
 name: Build and Release Distributable Package
 
 on:
@@ -174,7 +174,38 @@ jobs:
         
     - name: Create native module patches
       run: |
-        node scripts/create-patches.js
+        # Create patches directory
+        mkdir -p patches
+        
+        # Create sqlite3 patch - cross-platform compatible
+        echo 'try {
+          module.exports = require("sqlite3");
+        } catch (e) {
+          console.warn("sqlite3 native module not available, using fallback");
+          module.exports = null;
+        }' > patches/sqlite3.js
+        
+        # Create keytar patch - cross-platform compatible  
+        echo 'try {
+          module.exports = require("keytar");
+        } catch (e) {
+          console.warn("keytar native module not available, using fallback");
+          module.exports = {
+            getPassword: () => Promise.resolve(null),
+            setPassword: () => Promise.resolve(),
+            deletePassword: () => Promise.resolve()
+          };
+        }' > patches/keytar.js
+        
+        # Create bcrypt patch - cross-platform compatible
+        echo 'try {
+          module.exports = require("bcrypt");
+        } catch (e) {
+          console.warn("bcrypt native module not available, using bcryptjs fallback");
+          module.exports = require("bcryptjs");
+        }' > patches/bcrypt.js
+        
+        echo "✓ Native module patches created"
         
     - name: Create portable executable
       run: |
@@ -215,8 +246,36 @@ jobs:
             
             echo "✓ ncc bundling successful, creating portable package..."
             
-            # Create final package structure using dedicated script
-            node scripts/create-bundle.js "${{ matrix.target }}" "${{ matrix.output }}" "ncc"
+            # Create final package structure - cross-platform compatible
+            mkdir -p dist
+            
+            # Copy bundled files
+            if [ -f "dist-bundle/index.js" ]; then
+              cp dist-bundle/index.js dist/
+            fi
+            if [ -f "package.json" ]; then
+              cp package.json dist/
+            fi
+            if [ -d "assets" ]; then
+              cp -r assets dist/
+            fi
+            if [ -d "contracts" ]; then
+              cp -r contracts dist/
+            fi
+            
+            # Create launcher script based on target platform
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              # Windows batch file
+              echo '@echo off
+        cd /d "%~dp0\dist"
+        node index.js %*' > "${{ matrix.output }}"
+            else
+              # Unix shell script
+              echo '#!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node index.js "$@"' > "${{ matrix.output }}"
+              chmod +x "${{ matrix.output }}"
+            fi
             
             echo "✓ Portable bundle created successfully"
           else
@@ -239,8 +298,36 @@ jobs:
           else
             echo "❌ PKG build failed, creating Node.js bundle..."
             
-            # Final fallback: Basic Node.js package using dedicated script
-            node scripts/create-bundle.js "${{ matrix.target }}" "${{ matrix.output }}" "fallback"
+            # Final fallback: Basic Node.js package - cross-platform compatible
+            mkdir -p dist
+            
+            # Copy source files
+            if [ -d "src" ]; then
+              cp -r src dist/
+            fi
+            if [ -f "package.json" ]; then
+              cp package.json dist/
+            fi
+            if [ -d "assets" ]; then
+              cp -r assets dist/
+            fi
+            if [ -d "contracts" ]; then
+              cp -r contracts dist/
+            fi
+            
+            # Create launcher script based on target platform
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              # Windows batch file
+              echo '@echo off
+        cd /d "%~dp0\dist"
+        node src/index.js %*' > "${{ matrix.output }}"
+            else
+              # Unix shell script
+              echo '#!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node src/index.js "$@"' > "${{ matrix.output }}"
+              chmod +x "${{ matrix.output }}"
+            fi
             
             echo "✓ Node.js bundle created as fallback"
           fi

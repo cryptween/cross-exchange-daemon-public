@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:31:52.294Z - Use dedicated scripts: Replace inline Node.js with separate script files
+# Trigger: 2025-10-24T20:38:15.508Z - Fix missing scripts: Use bash commands until scripts are obfuscated
 name: Enhanced Build and Release Pipeline
 
 on:
