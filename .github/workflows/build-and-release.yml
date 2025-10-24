@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T22:11:39.689Z - Improve executable testing - fix path issues and add debugging
+# Trigger: 2025-10-24T22:20:09.931Z - Fix V8 fatal errors - create obfuscation-safe Node.js distribution
 name: Build and Release Distributable Package
 
 on:
@@ -202,12 +202,13 @@ jobs:
         echo "Installing build dependencies..."
         npm install --no-save @vercel/ncc pkg
         
-        # Method 1: Try NCC bundling first (handles most dependencies better)
-        echo "🔄 Attempting NCC bundling approach..."
+        # Method 1: Try NCC bundling first (handles obfuscated code better)
+        echo "🔄 Attempting NCC bundling approach (better for obfuscated code)..."
         
+        # For obfuscated code, we need to be more careful with bundling
         if npx ncc build src/index.js \
           --out dist-bundle \
-          --minify \
+          --no-minify \
           --no-source-map-register \
           --external sqlite3 \
           --external keytar \
@@ -220,7 +221,7 @@ jobs:
           
           echo "✓ NCC bundling successful"
           
-          # Create package.json for the bundled code
+          # Create package.json for the bundled code with obfuscation-friendly settings
           echo '{
             "name": "cross-exchange-daemon",
             "version": "1.0.0",
@@ -229,7 +230,8 @@ jobs:
             "pkg": {
               "scripts": "index.js",
               "targets": ["${{ matrix.target }}"],
-              "assets": ["../assets/**/*", "../contracts/**/*"]
+              "assets": ["../assets/**/*", "../contracts/**/*"],
+              "compress": "Brotli"
             }
           }' > dist-bundle/package.json
           
@@ -268,79 +270,108 @@ jobs:
           echo "❌ NCC bundling failed"
         fi
         
-        # Method 2: Direct PKG build (fallback)
-        echo "🔄 Attempting direct PKG build..."
+        # Method 2: Skip direct PKG for obfuscated code (causes V8 errors)
+        echo "⚠️ Skipping direct PKG build for obfuscated code (prevents V8 fatal errors)"
+        echo "� Creating optimized Node.js distribution instead..."
         
-        # Try PKG directly on the original source
-        if npx pkg . --target ${{ matrix.target }} --output ${{ matrix.output }}; then
-          echo "✓ Direct PKG build successful"
-          
-          # Verify the executable
-          if [ -f "${{ matrix.output }}" ]; then
-            file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
-            echo "📊 Executable size: $file_size bytes"
-            
-            if [ "$file_size" -gt 10000000 ]; then  # 10MB minimum
-              echo "✅ Direct PKG executable created successfully"
-              exit 0
-            else
-              echo "⚠️ Executable seems too small ($file_size bytes), creating Node.js bundle..."
-            fi
-          fi
-        else
-          echo "❌ Direct PKG build failed"
-        fi
-        
-        # Method 3: Comprehensive Node.js bundle (final fallback)
-        echo "🔄 Creating comprehensive Node.js bundle..."
+        # Method 3: Optimized Node.js distribution (obfuscation-safe)
+        echo "🔄 Creating optimized Node.js distribution (obfuscation-compatible)..."
         
         # Create a comprehensive distribution package
-        mkdir -p dist-final/node_modules
+        mkdir -p dist-final
         
-        # Copy source files
-        cp -r src dist-final/
-        cp package.json dist-final/
-        cp package-lock.json dist-final/ 2>/dev/null || echo "No package-lock.json found"
+        # If we have a successful NCC bundle, use it; otherwise use source
+        if [ -f "dist-bundle/index.js" ]; then
+          echo "✓ Using NCC bundled code as base"
+          cp dist-bundle/index.js dist-final/
+          cp dist-bundle/package.json dist-final/
+          
+          # Copy assets from bundle
+          if [ -d "dist-bundle/assets" ]; then
+            cp -r dist-bundle/assets dist-final/
+          fi
+          if [ -d "dist-bundle/contracts" ]; then
+            cp -r dist-bundle/contracts dist-final/
+          fi
+        else
+          echo "ℹ️ Using original source files"
+          cp -r src dist-final/
+          cp package.json dist-final/
+          cp package-lock.json dist-final/ 2>/dev/null || echo "No package-lock.json found"
+        fi
         
-        # Copy assets
-        if [ -d "assets" ]; then
+        # Copy assets from original location if not already copied
+        if [ -d "assets" ] && [ ! -d "dist-final/assets" ]; then
           cp -r assets dist-final/
         fi
-        if [ -d "contracts" ]; then
+        if [ -d "contracts" ] && [ ! -d "dist-final/contracts" ]; then
           cp -r contracts dist-final/
         fi
         
-        # Copy critical node_modules (for obfuscated code)
-        echo "Copying essential dependencies..."
-        essential_deps="express sqlite3 bcrypt bcryptjs ccxt winston joi moment axios cors helmet morgan"
+        # Create a minimal node_modules with only essential dependencies
+        mkdir -p dist-final/node_modules
+        echo "📦 Copying essential dependencies for obfuscated runtime..."
         
-        for dep in $essential_deps; do
+        # These are the absolutely critical modules for the daemon
+        critical_deps="express sqlite3 bcrypt bcryptjs ccxt winston joi moment axios cors helmet morgan compression dotenv"
+        
+        for dep in $critical_deps; do
           if [ -d "node_modules/$dep" ]; then
-            cp -r "node_modules/$dep" "dist-final/node_modules/" 2>/dev/null || echo "Skipping $dep"
+            echo "  → $dep"
+            cp -r "node_modules/$dep" "dist-final/node_modules/" 2>/dev/null || echo "    ⚠️ Failed to copy $dep"
           fi
         done
         
-        # Create startup script
+                # Create startup script
         if [[ "${{ matrix.target }}" == *"win"* ]]; then
           # Windows batch file
-          cat > "${{ matrix.output }}" << 'EOL'
-        @echo off
-        set "SCRIPT_DIR=%~dp0"
-        cd /d "%SCRIPT_DIR%\dist-final"
-        node src/index.js %*
-        EOL
+          echo '@echo off' > "${{ matrix.output }}"
+          echo 'echo.' >> "${{ matrix.output }}"
+          echo 'echo ╔══════════════════════════════════════════════════════════════╗' >> "${{ matrix.output }}"
+          echo 'echo ║                 Cross Exchange Daemon Launcher               ║' >> "${{ matrix.output }}"
+          echo 'echo ║              Obfuscated Distribution v0.0.5                  ║' >> "${{ matrix.output }}"
+          echo 'echo ╚══════════════════════════════════════════════════════════════╝' >> "${{ matrix.output }}"
+          echo 'echo.' >> "${{ matrix.output }}"
+          echo 'echo Starting daemon...' >> "${{ matrix.output }}"
+          echo 'echo.' >> "${{ matrix.output }}"
+          echo 'set "SCRIPT_DIR=%~dp0"' >> "${{ matrix.output }}"
+          echo 'cd /d "%SCRIPT_DIR%\dist-final"' >> "${{ matrix.output }}"
+          echo 'if exist "index.js" (' >> "${{ matrix.output }}"
+          echo '    node index.js %*' >> "${{ matrix.output }}"
+          echo ') else (' >> "${{ matrix.output }}"
+          echo '    node src/index.js %*' >> "${{ matrix.output }}"
+          echo ')' >> "${{ matrix.output }}"
         else
           # Unix shell script
-          cat > "${{ matrix.output }}" << 'EOL'
-        #!/bin/bash
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        cd "$SCRIPT_DIR/dist-final"
-        exec node src/index.js "$@"
-        EOL
+          echo '#!/bin/bash' > "${{ matrix.output }}"
+          echo '' >> "${{ matrix.output }}"
+          echo 'echo ""' >> "${{ matrix.output }}"
+          echo 'echo "╔══════════════════════════════════════════════════════════════╗"' >> "${{ matrix.output }}"
+          echo 'echo "║                 Cross Exchange Daemon Launcher               ║"' >> "${{ matrix.output }}"
+          echo 'echo "║              Obfuscated Distribution v0.0.5                  ║"' >> "${{ matrix.output }}"
+          echo 'echo "╚══════════════════════════════════════════════════════════════╝"' >> "${{ matrix.output }}"
+          echo 'echo ""' >> "${{ matrix.output }}"
+          echo 'echo "Starting daemon..."' >> "${{ matrix.output }}"
+          echo 'echo ""' >> "${{ matrix.output }}"
+          echo 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' >> "${{ matrix.output }}"
+          echo 'cd "$SCRIPT_DIR/dist-final"' >> "${{ matrix.output }}"
+          echo 'if ! command -v node >/dev/null 2>&1; then' >> "${{ matrix.output }}"
+          echo '    echo "Error: Node.js is not installed"' >> "${{ matrix.output }}"
+          echo '    echo "Please install Node.js from: https://nodejs.org"' >> "${{ matrix.output }}"
+          echo '    exit 1' >> "${{ matrix.output }}"
+          echo 'fi' >> "${{ matrix.output }}"
+          echo 'if [ -f "index.js" ]; then' >> "${{ matrix.output }}"
+          echo '    exec node index.js "$@"' >> "${{ matrix.output }}"
+          echo 'else' >> "${{ matrix.output }}"
+          echo '    exec node src/index.js "$@"' >> "${{ matrix.output }}"
+          echo 'fi' >> "${{ matrix.output }}"
           chmod +x "${{ matrix.output }}"
         fi
         
         # Create package info
+        echo "Cross Exchange Daemon - Obfuscated Node.js Distribution" > dist-final/README.txt
+        echo "Requires Node.js v16+ to run" >> dist-final/README.txt
+        echo "Usage: ./${{ matrix.output }}" >> dist-final/README.txt        # Create package info
         echo "Cross Exchange Daemon - Node.js Bundle
         This package requires Node.js to run.
         To start: ./${{ matrix.output }}
