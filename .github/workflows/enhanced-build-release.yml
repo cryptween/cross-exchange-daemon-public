@@ -1,12 +1,13 @@
-# Trigger: 2025-10-24T21:47:43.982Z - Fix executable packaging - proper PKG build
-name: Enhanced Build and Release Pipeline
+# Trigger: 2025-10-24T22:04:56.147Z - Fix executable packaging - proper release build
+name: Enhanced Build and Release Pipeline (DISABLED)
 
 on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
+  # Disabled to avoid conflicts with build-and-release.yml
+  # push:
+  #   branches: [ main, master ]
+  #   tags: [ 'v*' ]
+  # pull_request:
+  #   branches: [ main, master ]
   workflow_dispatch:
     inputs:
       release_type:
@@ -694,7 +695,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Login to DockerHub
-      if: github.event_name != 'pull_request' && secrets.DOCKERHUB_USERNAME
+      if: github.event_name != 'pull_request'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}

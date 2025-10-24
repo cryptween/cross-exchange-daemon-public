@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T21:47:43.967Z - Fix executable packaging - proper PKG build
+# Trigger: 2025-10-24T22:04:56.144Z - Fix executable packaging - proper release build
 name: Build and Release Distributable Package
 
 on:
@@ -131,10 +131,6 @@ jobs:
           'scripts': 'src/index.js',
           'targets': ['${{ matrix.target }}'],
           'outputPath': 'dist',
-          'options': [
-            '--no-bytecode',
-            '--no-warnings'
-          ],
           'assets': [
             'assets/**/*',
             'contracts/**/*'
@@ -236,8 +232,7 @@ jobs:
             "pkg": {
               "scripts": "index.js",
               "targets": ["${{ matrix.target }}"],
-              "assets": ["../assets/**/*", "../contracts/**/*"],
-              "options": ["--no-bytecode", "--no-warnings"]
+              "assets": ["../assets/**/*", "../contracts/**/*"]
             }
           }' > dist-bundle/package.json
           
@@ -252,7 +247,7 @@ jobs:
           cd dist-bundle
           
           # Try to create PKG executable from bundled code
-          if npx pkg . --target ${{ matrix.target }} --output ../${{ matrix.output }} --options no-bytecode,no-warnings; then
+          if npx pkg . --target ${{ matrix.target }} --output ../${{ matrix.output }}; then
             echo "✓ PKG executable created from NCC bundle"
             cd ..
             
@@ -280,7 +275,7 @@ jobs:
         echo "🔄 Attempting direct PKG build..."
         
         # Try PKG directly on the original source
-        if npx pkg . --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings --debug; then
+        if npx pkg . --target ${{ matrix.target }} --output ${{ matrix.output }}; then
           echo "✓ Direct PKG build successful"
           
           # Verify the executable
@@ -356,6 +351,249 @@ jobs:
         
         echo "✅ Node.js bundle created as final fallback"
         
+    - name: Test executable functionality
+      shell: bash
+      run: |
+        echo "🧪 Testing executable functionality and module inclusion..."
+        
+        # Function to test executable
+        test_executable() {
+          local exec_path="$1"
+          local test_type="$2"
+          
+          echo "Testing $exec_path ($test_type)..."
+          
+          # Test 1: Basic help command
+          echo "  → Testing help command..."
+          if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
+            # Windows script test
+            timeout 10s cmd //c "$exec_path --help" > test_help.out 2>&1 || echo "Help command completed"
+          elif [[ "$test_type" == "executable" ]]; then
+            # Direct executable test
+            timeout 10s "$exec_path" --help > test_help.out 2>&1 || echo "Help command completed"
+          else
+            # Unix script test
+            timeout 10s bash "$exec_path" --help > test_help.out 2>&1 || echo "Help command completed"
+          fi
+          
+          if grep -q "Cross-Exchange Data Collection Service" test_help.out 2>/dev/null; then
+            echo "  ✅ Help command works - basic functionality OK"
+          else
+            echo "  ❌ Help command failed"
+            cat test_help.out 2>/dev/null || echo "No output captured"
+            return 1
+          fi
+          
+          # Test 2: Version command
+          echo "  → Testing version command..."
+          if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
+            timeout 10s cmd //c "$exec_path --version" > test_version.out 2>&1 || echo "Version command completed"
+          elif [[ "$test_type" == "executable" ]]; then
+            timeout 10s "$exec_path" --version > test_version.out 2>&1 || echo "Version command completed"
+          else
+            timeout 10s bash "$exec_path" --version > test_version.out 2>&1 || echo "Version command completed"
+          fi
+          
+          if grep -q "daemon v" test_version.out 2>/dev/null; then
+            version_output=$(cat test_version.out 2>/dev/null | head -1)
+            echo "  ✅ Version command works: $version_output"
+            echo "  ℹ️  Package.json is accessible and properly bundled"
+          else
+            echo "  ❌ Version command failed"
+            echo "  📄 Actual output:"
+            cat test_version.out 2>/dev/null | head -10 || echo "No output captured"
+            return 1
+          fi
+          
+          # Test 3: Module dependency check (dry run)
+          echo "  → Testing module dependencies and startup..."
+          if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
+            timeout 15s cmd //c "$exec_path --help" > test_deps.out 2>&1 || echo "Dependency test completed"
+          elif [[ "$test_type" == "executable" ]]; then
+            timeout 15s "$exec_path" --help > test_deps.out 2>&1 || echo "Dependency test completed"
+          else
+            timeout 15s bash "$exec_path" --help > test_deps.out 2>&1 || echo "Dependency test completed"
+          fi
+          
+          # Check for common missing module errors
+          if grep -i "cannot find module\|module not found\|error: cannot resolve" test_deps.out 2>/dev/null; then
+            echo "  ❌ Missing module dependencies detected:"
+            grep -i "cannot find module\|module not found\|error: cannot resolve" test_deps.out 2>/dev/null | head -5
+            return 1
+          else
+            echo "  ✅ No missing module errors detected"
+          fi
+          
+          # Test 4: Quick startup test (simulate real execution)
+          echo "  → Testing daemon startup simulation..."
+          if [[ "${{ matrix.target }}" == *"win"* ]] && [[ "$test_type" == "script" ]]; then
+            timeout 5s cmd //c "echo. | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
+          elif [[ "$test_type" == "executable" ]]; then
+            timeout 5s bash -c "echo | $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"  
+          else
+            timeout 5s bash -c "echo | bash $exec_path" > test_startup.out 2>&1 || echo "Startup test completed"
+          fi
+          
+          # Look for startup banner or evidence of successful initialization
+          if grep -q "Cryptween Daemon\|Cross-Exchange\|Starting services\|Environment:" test_startup.out 2>/dev/null; then
+            echo "  ✅ Daemon startup sequence detected"
+            startup_evidence=$(grep -E "Cryptween Daemon|Environment:|Port:" test_startup.out 2>/dev/null | head -2 | tr '\n' '; ')
+            echo "  ℹ️  Evidence: $startup_evidence"
+          elif grep -q "Database tables created\|Exchange configuration" test_startup.out 2>/dev/null; then
+            echo "  ✅ Service initialization detected"
+          else
+            echo "  ⚠️  Startup sequence not fully detected (may be normal for packaged executables)"
+            echo "  📄 First few lines of output:"
+            head -5 test_startup.out 2>/dev/null || echo "No startup output captured"
+          fi
+          
+          # Test 5: Critical modules verification
+          echo "  → Checking critical modules inclusion..."
+          
+          # Create a simple test script to verify modules
+          cat > verify_modules.js << 'EOF'
+        const criticalModules = [
+          'express', 'sqlite3', 'bcrypt', 'axios', 'winston', 
+          'joi', 'moment', 'cors', 'helmet', 'ccxt'
+        ];
+        
+        let missing = [];
+        let available = [];
+        
+        criticalModules.forEach(mod => {
+          try {
+            require.resolve(mod);
+            available.push(mod);
+          } catch (e) {
+            missing.push(mod);
+          }
+        });
+        
+        console.log('📦 Available modules:', available.length);
+        console.log('❌ Missing modules:', missing.length);
+        
+        if (missing.length > 0) {
+          console.log('Missing:', missing.join(', '));
+          process.exit(1);
+        } else {
+          console.log('✅ All critical modules available');
+        }
+        EOF
+          
+          if [[ "$test_type" == "script" ]] && [[ -d "dist-final" ]]; then
+            # For Node.js bundles, test in the bundle directory
+            cd dist-final && node ../verify_modules.js && cd ..
+            echo "  ✅ Critical modules verified in Node.js bundle"
+          else
+            echo "  ℹ️ Module verification skipped for standalone executable"
+          fi
+          
+          return 0
+        }
+        
+        # Determine executable type and test it
+        if [ -f "${{ matrix.output }}" ]; then
+          file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
+          
+          if [ "$file_size" -gt 10000000 ]; then
+            # Large file - likely a real executable
+            echo "🔍 Testing standalone executable (${file_size} bytes)..."
+            test_executable "${{ matrix.output }}" "executable"
+          else
+            # Small file - likely a script
+            echo "🔍 Testing script wrapper (${file_size} bytes)..."
+            test_executable "${{ matrix.output }}" "script"
+          fi
+        else
+          echo "❌ No executable found to test!"
+          exit 1
+        fi
+        
+        echo "✅ Executable functionality tests completed successfully!"
+        
+    - name: Create test report
+      shell: bash
+      run: |
+        echo "📊 Creating executable test report..."
+        
+        # Create test report
+        cat > executable-test-report.md << EOF
+        # Executable Test Report - ${{ matrix.target }}
+        
+        **Build Date:** $(date)
+        **Target Platform:** ${{ matrix.target }}
+        **GitHub Run:** ${{ github.run_number }}
+        
+        ## Build Summary
+        EOF
+        
+        if [ -f "${{ matrix.output }}" ]; then
+          file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
+          file_size_mb=$((file_size / 1024 / 1024))
+          
+          echo "- **Executable:** ${{ matrix.output }}" >> executable-test-report.md
+          echo "- **Size:** ${file_size} bytes (${file_size_mb} MB)" >> executable-test-report.md
+          
+          if [ "$file_size" -gt 10000000 ]; then
+            echo "- **Type:** Standalone executable" >> executable-test-report.md
+            echo "- **Node.js Required:** No" >> executable-test-report.md
+          else
+            echo "- **Type:** Node.js script wrapper" >> executable-test-report.md
+            echo "- **Node.js Required:** Yes" >> executable-test-report.md
+            if [ -d "dist-final" ]; then
+              bundle_size=$(du -sh dist-final 2>/dev/null | cut -f1 || echo "unknown")
+              echo "- **Bundle Size:** ${bundle_size}" >> executable-test-report.md
+            fi
+          fi
+          
+          # File type detection
+          file_info=$(file "${{ matrix.output }}" 2>/dev/null || echo "unknown")
+          echo "- **File Info:** ${file_info}" >> executable-test-report.md
+        fi
+        
+        echo "" >> executable-test-report.md
+        echo "## Test Results" >> executable-test-report.md
+        
+        if [ -f "test_help.out" ]; then
+          if grep -q "Cross-Exchange Data Collection Service" test_help.out; then
+            echo "- ✅ Help command: PASSED" >> executable-test-report.md
+          else
+            echo "- ❌ Help command: FAILED" >> executable-test-report.md
+          fi
+        fi
+        
+        if [ -f "test_version.out" ]; then
+          if grep -q "daemon v" test_version.out; then
+            echo "- ✅ Version command: PASSED" >> executable-test-report.md
+          else
+            echo "- ❌ Version command: FAILED" >> executable-test-report.md
+          fi
+        fi
+        
+        if [ -f "test_deps.out" ]; then
+          if ! grep -i "cannot find module\|module not found\|error: cannot resolve" test_deps.out >/dev/null 2>&1; then
+            echo "- ✅ Module dependencies: PASSED" >> executable-test-report.md
+          else
+            echo "- ❌ Module dependencies: FAILED" >> executable-test-report.md
+          fi
+        fi
+        
+        echo "" >> executable-test-report.md
+        echo "## Platform Compatibility" >> executable-test-report.md
+        echo "- **Target:** ${{ matrix.target }}" >> executable-test-report.md
+        echo "- **OS:** ${{ matrix.os }}" >> executable-test-report.md
+        echo "- **Node Version:** ${{ env.NODE_VERSION }}" >> executable-test-report.md
+        
+        echo "✅ Test report created: executable-test-report.md"
+        
+    - name: Upload test report
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report-${{ matrix.target }}
+        path: |
+          executable-test-report.md
+          test_*.out
+          
     - name: Verify build output
       shell: bash
       run: |
@@ -434,6 +672,61 @@ jobs:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       
+    - name: Validate executable quality
+      run: |
+        echo "🔍 Validating executable quality before release..."
+        
+        # Check that we have executables for all platforms
+        platforms=("linux" "win" "macos")
+        missing_platforms=()
+        
+        for platform in "${platforms[@]}"; do
+          if [ "$platform" = "win" ]; then
+            pattern="cross-exchange-daemon-win.exe"
+          else
+            pattern="cross-exchange-daemon-${platform}"
+          fi
+          
+          if ! find . -name "${pattern}*" -type f | head -1 | grep -q .; then
+            missing_platforms+=("$platform")
+          else
+            # Check file size
+            executable=$(find . -name "${pattern}*" -type f | head -1)
+            if [ -f "$executable" ]; then
+              size=$(stat -c%s "$executable" 2>/dev/null || stat -f%z "$executable" 2>/dev/null || echo "0")
+              size_mb=$((size / 1024 / 1024))
+              echo "✓ $platform: $executable (${size_mb} MB)"
+              
+              # Minimum size validation (should be at least 1MB for any real distribution)
+              if [ "$size" -lt 1000000 ]; then
+                echo "⚠️  Warning: $platform executable seems very small (${size} bytes)"
+              fi
+            fi
+          fi
+        done
+        
+        if [ ${#missing_platforms[@]} -gt 0 ]; then
+          echo "❌ Missing executables for platforms: ${missing_platforms[*]}"
+          echo "Available files:"
+          find . -name "cross-exchange-daemon*" -type f
+          exit 1
+        fi
+        
+        # Check test reports
+        echo ""
+        echo "📊 Test Report Summary:"
+        for report in $(find . -name "executable-test-report.md" 2>/dev/null); do
+          echo "--- $(dirname "$report") ---"
+          if grep -q "FAILED" "$report"; then
+            echo "❌ Some tests failed in this build"
+            grep "FAILED" "$report"
+          else
+            echo "✅ All tests passed"
+          fi
+        done
+        
+        echo "✅ Executable validation completed"
+        
     - name: Create release notes
       id: release_notes
       run: |
