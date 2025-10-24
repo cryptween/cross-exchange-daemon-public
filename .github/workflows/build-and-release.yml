@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T21:03:47.325Z - release 0.0.1
+# Trigger: 2025-10-24T21:47:43.967Z - Fix executable packaging - proper PKG build
 name: Build and Release Distributable Package
 
 on:
@@ -132,24 +132,16 @@ jobs:
           'targets': ['${{ matrix.target }}'],
           'outputPath': 'dist',
           'options': [
-            '--enable-source-maps',
-            '--no-bytecode'
+            '--no-bytecode',
+            '--no-warnings'
           ],
           'assets': [
             'assets/**/*',
-            'contracts/**/*',
-            'node_modules/sqlite3/lib/binding/**/*',
-            'node_modules/keytar/build/**/*',
-            'node_modules/bcrypt/lib/binding/**/*'
-          ],
-          'patches': {
-            'sqlite3': 'patches/sqlite3.js',
-            'keytar': 'patches/keytar.js',
-            'bcrypt': 'patches/bcrypt.js'
-          }
+            'contracts/**/*'
+          ]
         };
         
-        // Handle problematic crypto packages
+        // Handle problematic crypto packages by excluding them
         const problematicPackages = [
           'websocket',
           'web3',
@@ -211,139 +203,216 @@ jobs:
     - name: Create portable executable
       shell: bash
       run: |
-        echo "Creating portable executable with native module support..."
+        echo "Creating executable for ${{ matrix.target }}..."
         
         # Install required build dependencies
         echo "Installing build dependencies..."
-        npm install --no-save @vercel/ncc fs-extra
+        npm install --no-save @vercel/ncc pkg
         
-        # First, try to use ncc bundling approach (similar to build-portable.sh)
-        echo "Attempting ncc bundling approach..."
+        # Method 1: Try NCC bundling first (handles most dependencies better)
+        echo "🔄 Attempting NCC bundling approach..."
         
-        # Verify ncc is available
-        if command -v npx >/dev/null && npx ncc --version >/dev/null 2>&1; then
-          echo "✓ ncc available, proceeding with bundling..."
+        if npx ncc build src/index.js \
+          --out dist-bundle \
+          --minify \
+          --no-source-map-register \
+          --external sqlite3 \
+          --external keytar \
+          --external bcrypt \
+          --external @truffle/codec \
+          --external @truffle/decoder \
+          --external @truffle/abi-utils \
+          --external @truffle/compile-common \
+          --quiet 2>/dev/null; then
           
-          # Try ncc bundling with external packages
-          if npx ncc build src/index.js \
-            --out dist-bundle \
-            --minify \
-            --no-source-map-register \
-            --external sqlite3 \
-            --external keytar \
-            --external bcrypt \
-            --external bcryptjs \
-            --external websocket \
-            --external web3 \
-            --external web3-core \
-            --external web3-providers-ws \
-            --external web3-core-requestmanager \
-            --external @truffle/contract \
-            --external @truffle/hdwallet-provider \
-            --external @truffle/codec \
-            --external @truffle/decoder \
-            --external @truffle/abi-utils \
-            --external @truffle/compile-common \
-            --quiet 2>/dev/null; then
+          echo "✓ NCC bundling successful"
+          
+          # Create package.json for the bundled code
+          echo '{
+            "name": "cross-exchange-daemon",
+            "version": "1.0.0",
+            "main": "index.js",
+            "bin": "index.js",
+            "pkg": {
+              "scripts": "index.js",
+              "targets": ["${{ matrix.target }}"],
+              "assets": ["../assets/**/*", "../contracts/**/*"],
+              "options": ["--no-bytecode", "--no-warnings"]
+            }
+          }' > dist-bundle/package.json
+          
+          # Copy assets if they exist
+          if [ -d "assets" ]; then
+            cp -r assets dist-bundle/
+          fi
+          if [ -d "contracts" ]; then
+            cp -r contracts dist-bundle/
+          fi
+          
+          cd dist-bundle
+          
+          # Try to create PKG executable from bundled code
+          if npx pkg . --target ${{ matrix.target }} --output ../${{ matrix.output }} --options no-bytecode,no-warnings; then
+            echo "✓ PKG executable created from NCC bundle"
+            cd ..
             
-            echo "✓ ncc bundling successful, creating portable package..."
-            
-            # Create final package structure - cross-platform compatible
-            mkdir -p dist
-            
-            # Copy bundled files
-            if [ -f "dist-bundle/index.js" ]; then
-              cp dist-bundle/index.js dist/
+            # Verify the executable was created and has reasonable size
+            if [ -f "${{ matrix.output }}" ]; then
+              file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
+              echo "📊 Executable size: $file_size bytes"
+              
+              if [ "$file_size" -gt 10000000 ]; then  # 10MB minimum for a real executable
+                echo "✅ PKG executable created successfully"
+                exit 0
+              else
+                echo "⚠️ Executable seems too small ($file_size bytes), trying PKG directly..."
+              fi
             fi
-            if [ -f "package.json" ]; then
-              cp package.json dist/
-            fi
-            if [ -d "assets" ]; then
-              cp -r assets dist/
-            fi
-            if [ -d "contracts" ]; then
-              cp -r contracts dist/
-            fi
-            
-            # Create launcher script based on target platform
-            if [[ "${{ matrix.target }}" == *"win"* ]]; then
-              # Windows batch file
-              echo '@echo off
-        cd /d "%~dp0\dist"
-        node index.js %*' > "${{ matrix.output }}"
-            else
-              # Unix shell script
-              echo '#!/bin/bash
-        cd "$(dirname "$0")/dist"
-        exec node index.js "$@"' > "${{ matrix.output }}"
-              chmod +x "${{ matrix.output }}"
-            fi
-            
-            echo "✓ Portable bundle created successfully"
           else
-            echo "❌ ncc bundling failed, trying pkg approach..."
+            echo "❌ PKG build from NCC bundle failed"
+            cd ..
           fi
         else
-          echo "❌ ncc not available, trying pkg approach..."
+          echo "❌ NCC bundling failed"
         fi
         
-        # If ncc approach didn't work, try PKG
-        if [ ! -f "${{ matrix.output }}" ]; then
-          echo "Attempting PKG executable build..."
+        # Method 2: Direct PKG build (fallback)
+        echo "🔄 Attempting direct PKG build..."
+        
+        # Try PKG directly on the original source
+        if npx pkg . --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings --debug; then
+          echo "✓ Direct PKG build successful"
           
-          # Install PKG if needed
-          npm install --no-save pkg || true
-          
-          # Try PKG with no-bytecode to avoid obfuscation issues
-          if npx pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings; then
-            echo "✓ PKG build successful"
-          else
-            echo "❌ PKG build failed, creating Node.js bundle..."
+          # Verify the executable
+          if [ -f "${{ matrix.output }}" ]; then
+            file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
+            echo "📊 Executable size: $file_size bytes"
             
-            # Final fallback: Basic Node.js package - cross-platform compatible
-            mkdir -p dist
-            
-            # Copy source files
-            if [ -d "src" ]; then
-              cp -r src dist/
-            fi
-            if [ -f "package.json" ]; then
-              cp package.json dist/
-            fi
-            if [ -d "assets" ]; then
-              cp -r assets dist/
-            fi
-            if [ -d "contracts" ]; then
-              cp -r contracts dist/
-            fi
-            
-            # Create launcher script based on target platform
-            if [[ "${{ matrix.target }}" == *"win"* ]]; then
-              # Windows batch file
-              echo '@echo off
-        cd /d "%~dp0\dist"
-        node src/index.js %*' > "${{ matrix.output }}"
+            if [ "$file_size" -gt 10000000 ]; then  # 10MB minimum
+              echo "✅ Direct PKG executable created successfully"
+              exit 0
             else
-              # Unix shell script
-              echo '#!/bin/bash
-        cd "$(dirname "$0")/dist"
-        exec node src/index.js "$@"' > "${{ matrix.output }}"
-              chmod +x "${{ matrix.output }}"
+              echo "⚠️ Executable seems too small ($file_size bytes), creating Node.js bundle..."
             fi
-            
-            echo "✓ Node.js bundle created as fallback"
           fi
+        else
+          echo "❌ Direct PKG build failed"
+        fi
+        
+        # Method 3: Comprehensive Node.js bundle (final fallback)
+        echo "🔄 Creating comprehensive Node.js bundle..."
+        
+        # Create a comprehensive distribution package
+        mkdir -p dist-final/node_modules
+        
+        # Copy source files
+        cp -r src dist-final/
+        cp package.json dist-final/
+        cp package-lock.json dist-final/ 2>/dev/null || echo "No package-lock.json found"
+        
+        # Copy assets
+        if [ -d "assets" ]; then
+          cp -r assets dist-final/
+        fi
+        if [ -d "contracts" ]; then
+          cp -r contracts dist-final/
+        fi
+        
+        # Copy critical node_modules (for obfuscated code)
+        echo "Copying essential dependencies..."
+        essential_deps="express sqlite3 bcrypt bcryptjs ccxt winston joi moment axios cors helmet morgan"
+        
+        for dep in $essential_deps; do
+          if [ -d "node_modules/$dep" ]; then
+            cp -r "node_modules/$dep" "dist-final/node_modules/" 2>/dev/null || echo "Skipping $dep"
+          fi
+        done
+        
+        # Create startup script
+        if [[ "${{ matrix.target }}" == *"win"* ]]; then
+          # Windows batch file
+          cat > "${{ matrix.output }}" << 'EOL'
+        @echo off
+        set "SCRIPT_DIR=%~dp0"
+        cd /d "%SCRIPT_DIR%\dist-final"
+        node src/index.js %*
+        EOL
+        else
+          # Unix shell script
+          cat > "${{ matrix.output }}" << 'EOL'
+        #!/bin/bash
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        cd "$SCRIPT_DIR/dist-final"
+        exec node src/index.js "$@"
+        EOL
+          chmod +x "${{ matrix.output }}"
+        fi
+        
+        # Create package info
+        echo "Cross Exchange Daemon - Node.js Bundle
+        This package requires Node.js to run.
+        To start: ./${{ matrix.output }}
+        " > dist-final/README.txt
+        
+        echo "✅ Node.js bundle created as final fallback"
+        
+    - name: Verify build output
+      shell: bash
+      run: |
+        echo "🔍 Verifying build output..."
+        
+        if [ -f "${{ matrix.output }}" ]; then
+          file_size=$(stat -c%s "${{ matrix.output }}" 2>/dev/null || stat -f%z "${{ matrix.output }}" 2>/dev/null || echo "0")
+          echo "📊 Output file: ${{ matrix.output }}"
+          echo "📏 File size: $file_size bytes ($(($file_size / 1024 / 1024)) MB)"
+          
+          # Check if it's a real executable or script
+          if file "${{ matrix.output }}" 2>/dev/null | grep -q "executable"; then
+            echo "✅ Created standalone executable"
+          elif file "${{ matrix.output }}" 2>/dev/null | grep -q "script"; then
+            echo "📝 Created script wrapper (requires Node.js runtime)"
+            if [ -d "dist-final" ]; then
+              dist_size=$(du -sh dist-final 2>/dev/null | cut -f1)
+              echo "📦 Bundle size: $dist_size"
+              echo "✅ Node.js bundle included"
+            fi
+          else
+            echo "❓ Unknown file type"
+          fi
+        else
+          echo "❌ No output file created!"
+          exit 1
         fi
         
     - name: Create archive (Unix)
       if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
-        tar -czf ${{ matrix.output }}.tar.gz ${{ matrix.output }}
+        echo "Creating archive for Unix systems..."
+        if [ -d "dist-final" ]; then
+          # Include the Node.js bundle directory
+          tar -czf ${{ matrix.output }}.tar.gz ${{ matrix.output }} dist-final/
+          echo "✓ Archive created with Node.js bundle"
+        else
+          # Just the executable
+          tar -czf ${{ matrix.output }}.tar.gz ${{ matrix.output }}
+          echo "✓ Archive created with executable only"
+        fi
         
     - name: Create archive (Windows)
       if: matrix.os == 'windows-latest'
+      shell: bash
       run: |
-        7z a ${{ matrix.output }}.zip ${{ matrix.output }}
+        echo "Creating archive for Windows..."
+        if [ -d "dist-final" ]; then
+          # Include the Node.js bundle directory
+          7z a ${{ matrix.output }}.zip ${{ matrix.output }} dist-final/
+          echo "✓ Archive created with Node.js bundle"
+        else
+          # Just the executable
+          7z a ${{ matrix.output }}.zip ${{ matrix.output }}
+          echo "✓ Archive created with executable only"
+        fi
         
     - name: Upload executable artifacts
       uses: actions/upload-artifact@v4
