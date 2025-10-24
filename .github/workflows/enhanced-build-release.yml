@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:05:51.562Z - Fix JavaScript escaping: syntax errors
+# Trigger: 2025-10-24T20:18:25.416Z - Simplify Node.js scripts: Use node -p single-line approach to avoid escaping
 name: Enhanced Build and Release Pipeline
 
 on:

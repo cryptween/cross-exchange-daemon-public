@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:05:51.560Z - Fix JavaScript escaping: syntax errors
+# Trigger: 2025-10-24T20:18:25.408Z - Simplify Node.js scripts: Use node -p single-line approach to avoid escaping
 name: Build and Release Distributable Package
 
 on:
@@ -174,53 +174,13 @@ jobs:
         
     - name: Create native module patches
       run: |
-        node -e "
-        const fs = require('fs');
-        
-        // Create patches directory
-        if (!fs.existsSync('patches')) {
-          fs.mkdirSync('patches');
-        }
-        
-        // Create sqlite3 patch
-        const sqlite3Content = [
-          'try {',
-          '  module.exports = require(\"sqlite3\");',
-          '} catch (e) {',
-          '  console.warn(\"sqlite3 native module not available, using fallback\");',
-          '  module.exports = null;',
-          '}'
-        ].join('\\n');
-        fs.writeFileSync('patches/sqlite3.js', sqlite3Content);
-        
-        // Create keytar patch
-        const keytarContent = [
-          'try {',
-          '  module.exports = require(\"keytar\");',
-          '} catch (e) {',
-          '  console.warn(\"keytar native module not available, using fallback\");',
-          '  module.exports = {',
-          '    getPassword: () => Promise.resolve(null),',
-          '    setPassword: () => Promise.resolve(),',
-          '    deletePassword: () => Promise.resolve()',
-          '  };',
-          '}'
-        ].join('\\n');
-        fs.writeFileSync('patches/keytar.js', keytarContent);
-        
-        // Create bcrypt patch
-        const bcryptContent = [
-          'try {',
-          '  module.exports = require(\"bcrypt\");',
-          '} catch (e) {',
-          '  console.warn(\"bcrypt native module not available, using bcryptjs fallback\");',
-          '  module.exports = require(\"bcryptjs\");',
-          '}'
-        ].join('\\n');
-        fs.writeFileSync('patches/bcrypt.js', bcryptContent);
-        
-        console.log('✓ Native module patches created');
-        "
+        node -p "
+        const fs = require('fs'); 
+        fs.mkdirSync('patches', {recursive: true}); 
+        fs.writeFileSync('patches/sqlite3.js', 'try { module.exports = require(\\\"sqlite3\\\"); } catch (e) { console.warn(\\\"sqlite3 not available\\\"); module.exports = null; }'); 
+        fs.writeFileSync('patches/keytar.js', 'try { module.exports = require(\\\"keytar\\\"); } catch (e) { console.warn(\\\"keytar not available\\\"); module.exports = { getPassword: () => Promise.resolve(null), setPassword: () => Promise.resolve(), deletePassword: () => Promise.resolve() }; }'); 
+        fs.writeFileSync('patches/bcrypt.js', 'try { module.exports = require(\\\"bcrypt\\\"); } catch (e) { console.warn(\\\"bcrypt not available\\\"); module.exports = require(\\\"bcryptjs\\\"); }'); 
+        'Patches created successfully'"
         
     - name: Create portable executable
       run: |
@@ -262,57 +222,17 @@ jobs:
             echo "✓ ncc bundling successful, creating portable package..."
             
             # Create final package structure using Node.js
-            node -e "
-            const fs = require('fs-extra');
-            const path = require('path');
-            
-            // Create dist directory
-            fs.ensureDirSync('dist');
-            
-            // Copy bundled file
-            if (fs.existsSync('dist-bundle/index.js')) {
-              fs.copyFileSync('dist-bundle/index.js', 'dist/index.js');
-            }
-            
-            // Copy package.json
-            if (fs.existsSync('package.json')) {
-              fs.copyFileSync('package.json', 'dist/package.json');
-            }
-            
-            // Copy assets and contracts if they exist
-            if (fs.existsSync('assets')) {
-              fs.copySync('assets', 'dist/assets');
-            }
-            if (fs.existsSync('contracts')) {
-              fs.copySync('contracts', 'dist/contracts');
-            }
-            
-            // Create launcher script
-            const target = '${{ matrix.target }}';
-            const outputFile = '${{ matrix.output }}';
-            
-            if (target.includes('win')) {
-              // Windows batch file
-              const batchContent = [
-                '@echo off',
-                'cd /d \"%~dp0\\\\dist\"',
-                'node index.js %*'
-              ].join('\\n');
-              fs.writeFileSync(outputFile, batchContent);
-            } else {
-              // Unix shell script
-              const shellContent = [
-                '#!/bin/bash',
-                'cd \"$(dirname \"$0\")/dist\"',
-                'exec node index.js \"$@\"'
-              ].join('\\n');
-              fs.writeFileSync(outputFile, shellContent);
-              // Make executable (will work on Unix systems)
-              try { fs.chmodSync(outputFile, '755'); } catch(e) {}
-            }
-            
-            console.log('✓ Portable bundle created successfully');
-            "
+            node -p "
+            const fs = require('fs-extra'); 
+            fs.ensureDirSync('dist'); 
+            if (fs.existsSync('dist-bundle/index.js')) fs.copyFileSync('dist-bundle/index.js', 'dist/index.js'); 
+            if (fs.existsSync('package.json')) fs.copyFileSync('package.json', 'dist/package.json'); 
+            if (fs.existsSync('assets')) fs.copySync('assets', 'dist/assets'); 
+            if (fs.existsSync('contracts')) fs.copySync('contracts', 'dist/contracts'); 
+            const target = '${{ matrix.target }}'; 
+            const output = '${{ matrix.output }}'; 
+            if (target.includes('win')) { fs.writeFileSync(output, '@echo off\\ncd /d \\\"%~dp0\\\\dist\\\"\\nnode index.js %*'); } else { fs.writeFileSync(output, '#!/bin/bash\\ncd \\\"$(dirname \\\"$0\\\")/dist\\\"\\nexec node index.js \\\"$@\\\"'); try { fs.chmodSync(output, '755'); } catch(e) {} } 
+            'Bundle created successfully'"
             
             echo "✓ Portable bundle created successfully"
           else
@@ -336,57 +256,17 @@ jobs:
             echo "❌ PKG build failed, creating Node.js bundle..."
             
             # Final fallback: Basic Node.js package using cross-platform commands
-            node -e "
-            const fs = require('fs-extra');
-            const path = require('path');
-            
-            // Create dist directory
-            fs.ensureDirSync('dist');
-            
-            // Copy source files
-            if (fs.existsSync('src')) {
-              fs.copySync('src', 'dist/src');
-            }
-            
-            // Copy package.json
-            if (fs.existsSync('package.json')) {
-              fs.copyFileSync('package.json', 'dist/package.json');
-            }
-            
-            // Copy assets and contracts if they exist
-            if (fs.existsSync('assets')) {
-              fs.copySync('assets', 'dist/assets');
-            }
-            if (fs.existsSync('contracts')) {
-              fs.copySync('contracts', 'dist/contracts');
-            }
-            
-            // Create launcher script
-            const target = '${{ matrix.target }}';
-            const outputFile = '${{ matrix.output }}';
-            
-            if (target.includes('win')) {
-              // Windows batch file
-              const batchContent = [
-                '@echo off',
-                'cd /d \"%~dp0\\\\dist\"',
-                'node src/index.js %*'
-              ].join('\\n');
-              fs.writeFileSync(outputFile, batchContent);
-            } else {
-              // Unix shell script
-              const shellContent = [
-                '#!/bin/bash',
-                'cd \"$(dirname \"$0\")/dist\"',
-                'exec node src/index.js \"$@\"'
-              ].join('\\n');
-              fs.writeFileSync(outputFile, shellContent);
-              // Make executable (will work on Unix systems)
-              try { fs.chmodSync(outputFile, '755'); } catch(e) {}
-            }
-            
-            console.log('✓ Node.js bundle created as fallback');
-            "
+            node -p "
+            const fs = require('fs-extra'); 
+            fs.ensureDirSync('dist'); 
+            if (fs.existsSync('src')) fs.copySync('src', 'dist/src'); 
+            if (fs.existsSync('package.json')) fs.copyFileSync('package.json', 'dist/package.json'); 
+            if (fs.existsSync('assets')) fs.copySync('assets', 'dist/assets'); 
+            if (fs.existsSync('contracts')) fs.copySync('contracts', 'dist/contracts'); 
+            const target = '${{ matrix.target }}'; 
+            const output = '${{ matrix.output }}'; 
+            if (target.includes('win')) { fs.writeFileSync(output, '@echo off\\ncd /d \\\"%~dp0\\\\dist\\\"\\nnode src/index.js %*'); } else { fs.writeFileSync(output, '#!/bin/bash\\ncd \\\"$(dirname \\\"$0\\\")/dist\\\"\\nexec node src/index.js \\\"$@\\\"'); try { fs.chmodSync(output, '755'); } catch(e) {} } 
+            'Fallback bundle created successfully'"
             
             echo "✓ Node.js bundle created as fallback"
           fi
