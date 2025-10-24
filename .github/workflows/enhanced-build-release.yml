@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T19:56:40.093Z - Fix Node.js inline script escaping: Replace template literals with concatenation
+# Trigger: 2025-10-24T20:04:32.186Z - Fix JavaScript escaping: Use array.join() for cleaner string generation
 name: Enhanced Build and Release Pipeline
 
 on:
