@@ -1,3 +1,4 @@
+# Trigger: 2025-10-24T19:21:58.353Z - Update workflow: Force ncc bundling, fix PKG obfuscation issues
 name: Enhanced Build and Release Pipeline
 
 on:

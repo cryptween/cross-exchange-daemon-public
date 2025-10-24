@@ -1,3 +1,4 @@
+# Trigger: 2025-10-24T19:21:58.343Z - Update workflow: Force ncc bundling, fix PKG obfuscation issues
 name: Build and Release Distributable Package
 
 on:
@@ -214,11 +215,15 @@ jobs:
         echo "Creating portable executable with native module support..."
         
         # First, try to use ncc bundling approach (similar to build-portable.sh)
-        if command -v npx >/dev/null && npm list @vercel/ncc >/dev/null 2>&1; then
-          echo "Attempting ncc bundling approach..."
-          
-          # Install ncc if not available
-          npm install --no-save @vercel/ncc || true
+        echo "Attempting ncc bundling approach..."
+        
+        # Install ncc - force installation
+        echo "Installing @vercel/ncc..."
+        npm install --no-save @vercel/ncc
+        
+        # Verify ncc is available
+        if command -v npx >/dev/null && npx ncc --version >/dev/null 2>&1; then
+          echo "✓ ncc available, proceeding with bundling..."
           
           # Try ncc bundling with external packages
           if npx ncc build src/index.js \
@@ -269,36 +274,50 @@ jobs:
             
             echo "✓ Portable bundle created successfully"
           else
-            echo "ncc bundling failed, trying pkg approach..."
+            echo "❌ ncc bundling failed, trying pkg approach..."
+          fi
+        else
+          echo "❌ ncc not available, trying pkg approach..."
+        fi
+        
+        # If ncc approach didn't work, try PKG
+        if [ ! -f "${{ matrix.output }}" ]; then
+          echo "Attempting PKG executable build..."
+          
+          # Install PKG if needed
+          npm install --no-save pkg || true
+          
+          # Try PKG with no-bytecode to avoid obfuscation issues
+          if npx pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings; then
+            echo "✓ PKG build successful"
+          else
+            echo "❌ PKG build failed, creating Node.js bundle..."
+            # Final fallback: Basic Node.js package
+            mkdir -p dist
+            cp -r src dist/
+            cp package.json dist/
+            [ -d assets ] && cp -r assets dist/ || true
+            [ -d contracts ] && cp -r contracts dist/ || true
             
-            # Fallback to pkg with better error handling
-            pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
-              echo "PKG also failed, creating basic Node.js package..."
-              
-              # Final fallback: Basic Node.js package
-              mkdir -p dist
-              cp -r src dist/
-              cp package.json dist/
-              
-              # Create launcher
-              if [[ "${{ matrix.target }}" == *"win"* ]]; then
-                cat > ${{ matrix.output }} << 'EOF'
+            # Create launcher for Node.js bundle
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              cat > ${{ matrix.output }} << 'EOF'
         @echo off
         cd /d "%~dp0\dist"
         node src/index.js %*
         EOF
-              else
-                cat > ${{ matrix.output }} << 'EOF'
+            else
+              cat > ${{ matrix.output }} << 'EOF'
         #!/bin/bash
         cd "$(dirname "$0")/dist"
         exec node src/index.js "$@"
         EOF
-                chmod +x ${{ matrix.output }}
-              fi
-            }
+              chmod +x ${{ matrix.output }}
+            fi
+            
+            echo "✓ Node.js bundle created as fallback"
           fi
-        else
-          echo "ncc not available, trying pkg approach..."
+        fi
           
           # Try pkg with better configuration
           pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
