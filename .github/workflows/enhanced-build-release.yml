@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T19:41:59.839Z - Fix Windows build: Replace bash commands with cross-platform Node.js
+# Trigger: 2025-10-24T19:56:40.093Z - Fix Node.js inline script escaping: Replace template literals with concatenation
 name: Enhanced Build and Release Pipeline
 
 on:

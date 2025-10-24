@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T19:41:59.837Z - Fix Windows build: Replace bash commands with cross-platform Node.js
+# Trigger: 2025-10-24T19:56:40.090Z - Fix Node.js inline script escaping: Replace template literals with concatenation
 name: Build and Release Distributable Package
 
 on:
@@ -183,32 +183,32 @@ jobs:
         }
         
         // Create sqlite3 patch
-        fs.writeFileSync('patches/sqlite3.js', \`try {
-          module.exports = require('sqlite3');
-        } catch (e) {
-          console.warn('sqlite3 native module not available, using fallback');
-          module.exports = null;
-        }\`);
+        fs.writeFileSync('patches/sqlite3.js', 'try {\\n' +
+          '  module.exports = require(\\'sqlite3\\');\\n' +
+          '} catch (e) {\\n' +
+          '  console.warn(\\'sqlite3 native module not available, using fallback\\');\\n' +
+          '  module.exports = null;\\n' +
+          '}');
         
         // Create keytar patch
-        fs.writeFileSync('patches/keytar.js', \`try {
-          module.exports = require('keytar');
-        } catch (e) {
-          console.warn('keytar native module not available, using fallback');
-          module.exports = {
-            getPassword: () => Promise.resolve(null),
-            setPassword: () => Promise.resolve(),
-            deletePassword: () => Promise.resolve()
-          };
-        }\`);
+        fs.writeFileSync('patches/keytar.js', 'try {\\n' +
+          '  module.exports = require(\\'keytar\\');\\n' +
+          '} catch (e) {\\n' +
+          '  console.warn(\\'keytar native module not available, using fallback\\');\\n' +
+          '  module.exports = {\\n' +
+          '    getPassword: () => Promise.resolve(null),\\n' +
+          '    setPassword: () => Promise.resolve(),\\n' +
+          '    deletePassword: () => Promise.resolve()\\n' +
+          '  };\\n' +
+          '}');
         
         // Create bcrypt patch
-        fs.writeFileSync('patches/bcrypt.js', \`try {
-          module.exports = require('bcrypt');
-        } catch (e) {
-          console.warn('bcrypt native module not available, using bcryptjs fallback');
-          module.exports = require('bcryptjs');
-        }\`);
+        fs.writeFileSync('patches/bcrypt.js', 'try {\\n' +
+          '  module.exports = require(\\'bcrypt\\');\\n' +
+          '} catch (e) {\\n' +
+          '  console.warn(\\'bcrypt native module not available, using bcryptjs fallback\\');\\n' +
+          '  module.exports = require(\\'bcryptjs\\');\\n' +
+          '}');
         
         console.log('✓ Native module patches created');
         "
@@ -284,15 +284,15 @@ jobs:
             
             if (target.includes('win')) {
               // Windows batch file
-              const batchContent = \`@echo off
-        cd /d \"%~dp0\\dist\"
-        node index.js %*\`;
+              const batchContent = '@echo off\\n' +
+                'cd /d \"%~dp0\\\\dist\"\\n' +
+                'node index.js %*';
               fs.writeFileSync(outputFile, batchContent);
             } else {
               // Unix shell script
-              const shellContent = \`#!/bin/bash
-        cd \"\$(dirname \"\$0\")/dist\"
-        exec node index.js \"\$@\"\`;
+              const shellContent = '#!/bin/bash\\n' +
+                'cd \"$(dirname \"$0\")/dist\"\\n' +
+                'exec node index.js \"$@\"';
               fs.writeFileSync(outputFile, shellContent);
               // Make executable (will work on Unix systems)
               try { fs.chmodSync(outputFile, '755'); } catch(e) {}
@@ -354,15 +354,15 @@ jobs:
             
             if (target.includes('win')) {
               // Windows batch file
-              const batchContent = \`@echo off
-        cd /d \"%~dp0\\dist\"
-        node src/index.js %*\`;
+              const batchContent = '@echo off\\n' +
+                'cd /d \"%~dp0\\\\dist\"\\n' +
+                'node src/index.js %*';
               fs.writeFileSync(outputFile, batchContent);
             } else {
               // Unix shell script
-              const shellContent = \`#!/bin/bash
-        cd \"\$(dirname \"\$0\")/dist\"
-        exec node src/index.js \"\$@\"\`;
+              const shellContent = '#!/bin/bash\\n' +
+                'cd \"$(dirname \"$0\")/dist\"\\n' +
+                'exec node src/index.js \"$@\"';
               fs.writeFileSync(outputFile, shellContent);
               // Make executable (will work on Unix systems)
               try { fs.chmodSync(outputFile, '755'); } catch(e) {}
