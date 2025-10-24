@@ -125,12 +125,15 @@ jobs:
         node -e "
         const pkg = require('./package.json');
         
-        // Configure pkg to handle native modules and problematic packages
+        # Configure pkg to handle native modules and problematic packages
         pkg.pkg = {
           'scripts': 'src/index.js',
           'targets': ['${{ matrix.target }}'],
           'outputPath': 'dist',
-          'options': ['--enable-source-maps'],
+          'options': [
+            '--enable-source-maps',
+            '--no-bytecode'
+          ],
           'assets': [
             'assets/**/*',
             'contracts/**/*',
@@ -145,7 +148,7 @@ jobs:
           }
         };
         
-        // Handle problematic crypto packages
+        # Handle problematic crypto packages
         const problematicPackages = [
           'websocket',
           'web3',
@@ -153,7 +156,11 @@ jobs:
           'web3-providers-ws',
           'web3-core-requestmanager',
           '@truffle/contract',
-          '@truffle/hdwallet-provider'
+          '@truffle/hdwallet-provider',
+          '@truffle/codec',
+          '@truffle/decoder',
+          '@truffle/abi-utils',
+          '@truffle/compile-common'
         ];
         
         if (!pkg.browser) pkg.browser = {};
@@ -205,35 +212,120 @@ jobs:
     - name: Create portable executable
       run: |
         echo "Creating portable executable with native module support..."
-        # Try pkg with error handling
-        pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
-          echo "Standard pkg failed, trying alternative approach..."
+        
+        # First, try to use ncc bundling approach (similar to build-portable.sh)
+        if command -v npx >/dev/null && npm list @vercel/ncc >/dev/null 2>&1; then
+          echo "Attempting ncc bundling approach..."
           
-          # Alternative: Create a bundled version without pkg
-          mkdir -p dist
-          cp -r src dist/
-          cp package.json dist/
-          cp -r node_modules dist/ 2>/dev/null || echo "node_modules copy failed"
+          # Install ncc if not available
+          npm install --no-save @vercel/ncc || true
           
-          # Create startup script
-          if [[ "${{ matrix.target }}" == *"win"* ]]; then
-            cat > dist/start.bat << 'EOF'
+          # Try ncc bundling with external packages
+          if npx ncc build src/index.js \
+            --out dist-bundle \
+            --minify \
+            --no-source-map-register \
+            --external sqlite3 \
+            --external keytar \
+            --external bcrypt \
+            --external bcryptjs \
+            --external websocket \
+            --external web3 \
+            --external web3-core \
+            --external web3-providers-ws \
+            --external web3-core-requestmanager \
+            --external @truffle/contract \
+            --external @truffle/hdwallet-provider \
+            --external @truffle/codec \
+            --external @truffle/decoder \
+            --external @truffle/abi-utils \
+            --external @truffle/compile-common \
+            --quiet 2>/dev/null; then
+            
+            echo "✓ ncc bundling successful, creating portable package..."
+            
+            # Create final package structure
+            mkdir -p dist
+            cp dist-bundle/index.js dist/
+            cp package.json dist/
+            [ -d assets ] && cp -r assets dist/ || true
+            [ -d contracts ] && cp -r contracts dist/ || true
+            
+            # Create launcher
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              cat > ${{ matrix.output }} << 'EOF'
         @echo off
+        cd /d "%~dp0\dist"
+        node index.js %*
+        EOF
+            else
+              cat > ${{ matrix.output }} << 'EOF'
+        #!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node index.js "$@"
+        EOF
+              chmod +x ${{ matrix.output }}
+            fi
+            
+            echo "✓ Portable bundle created successfully"
+          else
+            echo "ncc bundling failed, trying pkg approach..."
+            
+            # Fallback to pkg with better error handling
+            pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
+              echo "PKG also failed, creating basic Node.js package..."
+              
+              # Final fallback: Basic Node.js package
+              mkdir -p dist
+              cp -r src dist/
+              cp package.json dist/
+              
+              # Create launcher
+              if [[ "${{ matrix.target }}" == *"win"* ]]; then
+                cat > ${{ matrix.output }} << 'EOF'
+        @echo off
+        cd /d "%~dp0\dist"
         node src/index.js %*
         EOF
-            # Create self-extracting archive for Windows
-            7z a -sfx ${{ matrix.output }} dist/*
-          else
-            cat > dist/start.sh << 'EOF'
+              else
+                cat > ${{ matrix.output }} << 'EOF'
         #!/bin/bash
-        cd "$(dirname "$0")"
-        node src/index.js "$@"
+        cd "$(dirname "$0")/dist"
+        exec node src/index.js "$@"
         EOF
-            chmod +x dist/start.sh
-            # Create self-extracting archive for Unix
-            tar -czf ${{ matrix.output }}.tar.gz -C dist .
+                chmod +x ${{ matrix.output }}
+              fi
+            }
           fi
-        }
+        else
+          echo "ncc not available, trying pkg approach..."
+          
+          # Try pkg with better configuration
+          pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings || {
+            echo "PKG failed, creating basic Node.js package..."
+            
+            # Fallback: Basic Node.js package
+            mkdir -p dist
+            cp -r src dist/
+            cp package.json dist/
+            
+            # Create launcher
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              cat > ${{ matrix.output }} << 'EOF'
+        @echo off
+        cd /d "%~dp0\dist"
+        node src/index.js %*
+        EOF
+            else
+              cat > ${{ matrix.output }} << 'EOF'
+        #!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node src/index.js "$@"
+        EOF
+              chmod +x ${{ matrix.output }}
+            fi
+          }
+        fi
         
     - name: Create archive (Unix)
       if: matrix.os != 'windows-latest'

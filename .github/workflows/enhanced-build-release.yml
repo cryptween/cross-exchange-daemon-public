@@ -492,41 +492,135 @@ jobs:
       run: |
         echo "🚀 Building executable for ${{ matrix.target }}"
         
-        # Try to build with pkg
-        if pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }}; then
-          echo "✅ Executable built successfully with pkg"
-        else
-          echo "⚠️ Pkg build failed, creating portable bundle..."
+        # First attempt: ncc bundling (handles problematic packages better)
+        if command -v npx >/dev/null; then
+          echo "🔧 Attempting ncc bundling approach..."
           
-          # Fallback: Create a portable Node.js bundle
-          mkdir -p dist
-          cp -r src dist/
-          cp package.json dist/
-          cp build-info.json dist/
+          # Install ncc if not available
+          npm install --no-save @vercel/ncc || true
           
-          # Copy critical native modules if available
-          if [ -d node_modules/sqlite3 ]; then
-            cp -r node_modules/sqlite3 dist/node_modules/ 2>/dev/null || true
-          fi
-          
-          # Create launcher script
-          if [[ "${{ matrix.target }}" == *"win"* ]]; then
-            cat > dist/${{ matrix.output }} << 'EOF'
+          # Try ncc bundling with external packages to avoid @truffle/codec issues
+          if npx ncc build src/index.js \
+            --out dist-bundle \
+            --minify \
+            --no-source-map-register \
+            --external sqlite3 \
+            --external keytar \
+            --external bcrypt \
+            --external bcryptjs \
+            --external websocket \
+            --external web3 \
+            --external web3-core \
+            --external web3-providers-ws \
+            --external web3-core-requestmanager \
+            --external @truffle/contract \
+            --external @truffle/hdwallet-provider \
+            --external @truffle/codec \
+            --external @truffle/decoder \
+            --external @truffle/abi-utils \
+            --external @truffle/compile-common \
+            --quiet 2>/dev/null; then
+            
+            echo "✅ ncc bundling successful, creating portable package..."
+            
+            # Create final package structure
+            mkdir -p dist
+            cp dist-bundle/index.js dist/
+            cp package.json dist/
+            cp build-info.json dist/
+            [ -d assets ] && cp -r assets dist/ || true
+            [ -d contracts ] && cp -r contracts dist/ || true
+            
+            # Create launcher
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              cat > ${{ matrix.output }} << 'EOF'
         @echo off
-        cd /d "%~dp0"
+        cd /d "%~dp0\dist"
+        node index.js %*
+        EOF
+            else
+              cat > ${{ matrix.output }} << 'EOF'
+        #!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node index.js "$@"
+        EOF
+              chmod +x ${{ matrix.output }}
+            fi
+            
+            echo "✅ Portable bundle created successfully with ncc"
+          else
+            echo "⚠️ ncc bundling failed, trying pkg..."
+            
+            # Second attempt: pkg (may fail with @truffle packages)
+            if pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings; then
+              echo "✅ Executable built successfully with pkg"
+            else
+              echo "⚠️ Pkg build also failed, creating basic Node.js bundle..."
+              
+              # Final fallback: Basic Node.js package
+              mkdir -p dist
+              cp -r src dist/
+              cp package.json dist/
+              cp build-info.json dist/
+              
+              # Copy critical native modules if available
+              if [ -d node_modules/sqlite3 ]; then
+                mkdir -p dist/node_modules
+                cp -r node_modules/sqlite3 dist/node_modules/ 2>/dev/null || true
+              fi
+              
+              # Create launcher script
+              if [[ "${{ matrix.target }}" == *"win"* ]]; then
+                cat > ${{ matrix.output }} << 'EOF'
+        @echo off
+        cd /d "%~dp0\dist"
         node src/index.js %*
         EOF
-          else
-            cat > dist/${{ matrix.output }} << 'EOF'
+              else
+                cat > ${{ matrix.output }} << 'EOF'
         #!/bin/bash
-        cd "$(dirname "$0")"
+        cd "$(dirname "$0")/dist"
         exec node src/index.js "$@"
         EOF
-            chmod +x dist/${{ matrix.output }}
+                chmod +x ${{ matrix.output }}
+              fi
+              
+              echo "✅ Basic Node.js bundle created"
+            fi
           fi
+        else
+          echo "⚠️ npx not available, trying pkg directly..."
           
-          # Move the bundle to the expected location
-          mv dist/${{ matrix.output }} ./
+          # Try pkg without ncc
+          if pkg package.json --target ${{ matrix.target }} --output ${{ matrix.output }} --options no-bytecode,no-warnings; then
+            echo "✅ Executable built successfully with pkg"
+          else
+            echo "⚠️ Pkg build failed, creating basic bundle..."
+            
+            # Fallback: Basic Node.js package
+            mkdir -p dist
+            cp -r src dist/
+            cp package.json dist/
+            cp build-info.json dist/
+            
+            # Create launcher script
+            if [[ "${{ matrix.target }}" == *"win"* ]]; then
+              cat > ${{ matrix.output }} << 'EOF'
+        @echo off
+        cd /d "%~dp0\dist"
+        node src/index.js %*
+        EOF
+            else
+              cat > ${{ matrix.output }} << 'EOF'
+        #!/bin/bash
+        cd "$(dirname "$0")/dist"
+        exec node src/index.js "$@"
+        EOF
+              chmod +x ${{ matrix.output }}
+            fi
+            
+            echo "✅ Basic Node.js bundle created"
+          fi
         fi
         
     - name: Test executable
