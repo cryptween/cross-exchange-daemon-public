@@ -1,4 +1,4 @@
-# Trigger: 2025-10-24T20:46:16.482Z - Force bash shell: Fix Windows PowerShell compatibility issues
+# Trigger: 2025-10-24T21:03:27.941Z - release 0.0.1
 name: Enhanced Build and Release Pipeline
 
 on:
